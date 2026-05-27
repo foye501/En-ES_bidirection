@@ -10,12 +10,36 @@ TRAIN_FILE="${TRAIN_FILE:-data/finetune/train.jsonl}"
 VALIDATION_FILE="${VALIDATION_FILE:-data/finetune/validation.jsonl}"
 OUTPUT_DIR="${OUTPUT_DIR:-artifacts/qwen3-4b-instruct-2507-en-es-lora}"
 MAIN_PROCESS_PORT="${MAIN_PROCESS_PORT:-29500}"
-PYTHON="${PYTHON:-python}"
+if [[ -z "${PYTHON:-}" ]]; then
+  if [[ -x ".venv/bin/python" ]]; then
+    PYTHON=".venv/bin/python"
+  else
+    PYTHON="python"
+  fi
+fi
 
 if [[ "$NUM_GPUS" -lt 2 || "$NUM_GPUS" -gt 4 ]]; then
   echo "NUM_GPUS must be between 2 and 4 for this launch script." >&2
   exit 1
 fi
+
+"$PYTHON" - <<'PY'
+import importlib.util
+import sys
+
+if importlib.util.find_spec("accelerate") is None:
+    raise SystemExit("accelerate is not installed. Run ./setup_a100_env.sh first, then retry.")
+
+import torch
+
+if not torch.cuda.is_available():
+    raise SystemExit("CUDA is not available. Run this launcher on the A100 server.")
+
+device_count = torch.cuda.device_count()
+print(f"Detected {device_count} CUDA device(s).")
+if device_count < 2:
+    raise SystemExit("This launcher expects at least 2 CUDA devices.")
+PY
 
 if [[ -z "${GRADIENT_ACCUMULATION_STEPS:-}" ]]; then
   denom=$((NUM_GPUS * PER_DEVICE_TRAIN_BATCH_SIZE))

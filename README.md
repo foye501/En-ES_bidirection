@@ -11,7 +11,27 @@ This workspace contains a JSONL dataset for supervised fine-tuning a Qwen chat m
 
 ## Setup
 
-Create an isolated environment, then install the training dependencies:
+On the A100 server, create the local virtual environment with:
+
+```bash
+./setup_a100_env.sh
+source .venv/bin/activate
+```
+
+If your server needs an explicit PyTorch CUDA wheel index, pass it through the environment:
+
+```bash
+TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121 ./setup_a100_env.sh
+```
+
+Conda alternative:
+
+```bash
+conda env create -f environment.yml
+conda activate en-es-finetune
+```
+
+Manual virtual environment setup:
 
 ```bash
 python3 -m venv .venv
