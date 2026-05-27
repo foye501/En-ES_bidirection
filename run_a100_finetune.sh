@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NUM_GPUS="${NUM_GPUS:-4}"
+NUM_GPUS="${NUM_GPUS:-1}"
 PER_DEVICE_TRAIN_BATCH_SIZE="${PER_DEVICE_TRAIN_BATCH_SIZE:-4}"
 TARGET_EFFECTIVE_BATCH_SIZE="${TARGET_EFFECTIVE_BATCH_SIZE:-32}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-1024}"
@@ -18,13 +18,14 @@ if [[ -z "${PYTHON:-}" ]]; then
   fi
 fi
 
-if [[ "$NUM_GPUS" -lt 2 || "$NUM_GPUS" -gt 4 ]]; then
-  echo "NUM_GPUS must be between 2 and 4 for this launch script." >&2
+if [[ "$NUM_GPUS" -lt 1 || "$NUM_GPUS" -gt 4 ]]; then
+  echo "NUM_GPUS must be between 1 and 4 for this launch script." >&2
   exit 1
 fi
 
-"$PYTHON" - <<'PY'
+REQUESTED_NUM_GPUS="$NUM_GPUS" "$PYTHON" - <<'PY'
 import importlib.util
+import os
 import sys
 
 if importlib.util.find_spec("accelerate") is None:
@@ -37,8 +38,9 @@ if not torch.cuda.is_available():
 
 device_count = torch.cuda.device_count()
 print(f"Detected {device_count} CUDA device(s).")
-if device_count < 2:
-    raise SystemExit("This launcher expects at least 2 CUDA devices.")
+requested_num_gpus = int(os.environ["REQUESTED_NUM_GPUS"])
+if device_count < requested_num_gpus:
+    raise SystemExit(f"Requested {requested_num_gpus} GPU(s), but only detected {device_count}.")
 PY
 
 if [[ -z "${GRADIENT_ACCUMULATION_STEPS:-}" ]]; then
@@ -49,13 +51,7 @@ if [[ -z "${GRADIENT_ACCUMULATION_STEPS:-}" ]]; then
   fi
 fi
 
-"$PYTHON" -m accelerate.commands.launch \
-  --multi_gpu \
-  --num_processes "$NUM_GPUS" \
-  --num_machines 1 \
-  --mixed_precision bf16 \
-  --main_process_port "$MAIN_PROCESS_PORT" \
-  train_qwen_lora.py \
+TRAIN_ARGS=(
   --model "$MODEL" \
   --train-file "$TRAIN_FILE" \
   --validation-file "$VALIDATION_FILE" \
@@ -69,3 +65,28 @@ fi
   --eval-steps "${EVAL_STEPS:-500}" \
   --save-steps "${SAVE_STEPS:-500}" \
   --logging-steps "${LOGGING_STEPS:-10}"
+)
+
+if [[ "${USE_4BIT:-0}" == "1" ]]; then
+  TRAIN_ARGS+=(--use-4bit)
+fi
+
+if [[ -n "${LORA_R:-}" ]]; then
+  TRAIN_ARGS+=(--lora-r "$LORA_R")
+fi
+
+if [[ -n "${LORA_ALPHA:-}" ]]; then
+  TRAIN_ARGS+=(--lora-alpha "$LORA_ALPHA")
+fi
+
+if [[ "$NUM_GPUS" -eq 1 ]]; then
+  "$PYTHON" train_qwen_lora.py "${TRAIN_ARGS[@]}"
+else
+  "$PYTHON" -m accelerate.commands.launch \
+    --multi_gpu \
+    --num_processes "$NUM_GPUS" \
+    --num_machines 1 \
+    --mixed_precision bf16 \
+    --main_process_port "$MAIN_PROCESS_PORT" \
+    train_qwen_lora.py "${TRAIN_ARGS[@]}"
+fi

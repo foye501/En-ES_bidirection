@@ -127,9 +127,43 @@ python train_qwen_lora.py \
 
 The final LoRA adapter is saved under `artifacts/qwen-en-es-lora/final`.
 
-## A100 Multi-GPU Run
+## A100 Training Run
 
-On the GPU server, install dependencies, prepare the JSONL files, then launch with 2-4 A100s:
+On the GPU server, install dependencies, prepare the JSONL files, then launch on one A100:
+
+```bash
+source .venv/bin/activate
+NUM_GPUS=1 ./run_a100_finetune.sh
+```
+
+For bidirectional training on one A100:
+
+```bash
+NUM_GPUS=1 \
+TRAIN_FILE=data/finetune_bidirectional/train.jsonl \
+VALIDATION_FILE=data/finetune_bidirectional/validation.jsonl \
+./run_a100_finetune.sh
+```
+
+If memory is tight, reduce the per-device batch size while keeping the effective batch near 32:
+
+```bash
+NUM_GPUS=1 \
+PER_DEVICE_TRAIN_BATCH_SIZE=2 \
+TARGET_EFFECTIVE_BATCH_SIZE=32 \
+./run_a100_finetune.sh
+```
+
+To use a stronger LoRA on one A100:
+
+```bash
+NUM_GPUS=1 \
+LORA_R=64 \
+LORA_ALPHA=128 \
+./run_a100_finetune.sh
+```
+
+To use 2-4 A100s:
 
 ```bash
 source .venv/bin/activate
