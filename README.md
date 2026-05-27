@@ -33,6 +33,16 @@ python prepare_finetune_data.py \
   --output-dir data/finetune
 ```
 
+For bidirectional EN-ES and ES-EN training:
+
+```bash
+python prepare_finetune_data.py \
+  --train-input data/azure_dataset_cleaned_train.csv \
+  --validation-input data/azure_dataset_cleaned_test.csv \
+  --output-dir data/finetune_bidirectional \
+  --bidirectional
+```
+
 Smoke split with 1,000 examples:
 
 ```bash
@@ -48,8 +58,8 @@ python prepare_finetune_data.py --output-dir data/finetune
 Each training row is converted into Qwen chat messages:
 
 - system: medical translation instruction
-- user: style, target length, and English scenario
-- assistant: Spanish translation
+- user: translation direction, style, target length, and source scenario
+- assistant: target-language translation
 
 ## First Smoke Training Run
 

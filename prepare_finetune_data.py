@@ -7,11 +7,18 @@ from pathlib import Path
 from tqdm import tqdm
 
 
-SYSTEM_PROMPT = (
-    "You are a professional medical translator. Translate English clinical "
-    "scenarios into strictly correct, fluent Spanish medical terminology. "
-    "Output only the Spanish translation."
-)
+SYSTEM_PROMPTS = {
+    "en-es": (
+        "You are a professional medical translator. Translate English clinical "
+        "scenarios into strictly correct, fluent Spanish medical terminology. "
+        "Output only the Spanish translation."
+    ),
+    "es-en": (
+        "You are a professional medical translator. Translate Spanish clinical "
+        "scenarios into strictly correct, fluent English medical terminology. "
+        "Output only the English translation."
+    ),
+}
 
 
 def parse_args():
@@ -25,27 +32,54 @@ def parse_args():
     parser.add_argument("--validation-ratio", type=float, default=0.02)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--limit", type=int, default=None, help="Optional row limit for a smoke dataset.")
+    parser.add_argument(
+        "--bidirectional",
+        action="store_true",
+        help="Emit both English-to-Spanish and Spanish-to-English examples for each row.",
+    )
     return parser.parse_args()
 
 
-def row_to_chat(row):
+def row_to_chat(row, direction="en-es"):
+    if direction == "en-es":
+        source_language = "English"
+        target_language = "Spanish"
+        source_text = row["english_scenario"]
+        target_text = row["spanish_translation"]
+    elif direction == "es-en":
+        source_language = "Spanish"
+        target_language = "English"
+        source_text = row["spanish_translation"]
+        target_text = row["english_scenario"]
+    else:
+        raise ValueError(f"Unsupported direction: {direction}")
+
     user = (
+        f"Direction: {source_language} to {target_language}\n"
         f"Style: {row['style']}\n"
         f"Target length: about {row['target_length']} words\n"
-        f"English: {row['english_scenario']}"
+        f"{source_language}: {source_text}"
     )
     return {
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPTS[direction]},
             {"role": "user", "content": user},
-            {"role": "assistant", "content": row["spanish_translation"]},
+            {"role": "assistant", "content": target_text},
         ],
         "metadata": {
             "term": row["term"],
             "target_length": row["target_length"],
             "style": row["style"],
+            "direction": direction,
         },
     }
+
+
+def row_to_examples(row, bidirectional=False):
+    examples = [row_to_chat(row, direction="en-es")]
+    if bidirectional:
+        examples.append(row_to_chat(row, direction="es-en"))
+    return examples
 
 
 def detect_format(path):
@@ -75,16 +109,19 @@ def validate_row(row, row_number, source):
         raise ValueError(f"{source} row {row_number} missing required fields: {missing}")
 
 
-def write_chat_rows(source_path, output_path, limit=None):
+def write_chat_rows(source_path, output_path, limit=None, bidirectional=False):
     count = 0
+    source_rows = 0
     with output_path.open("w", encoding="utf-8") as out:
         for row_number, row in enumerate(tqdm(iter_rows(source_path), desc=f"Preparing {source_path.name}"), start=1):
-            if limit is not None and count >= limit:
+            if limit is not None and source_rows >= limit:
                 break
             validate_row(row, row_number, source_path)
-            out.write(json.dumps(row_to_chat(row), ensure_ascii=False) + "\n")
-            count += 1
-    return count
+            for example in row_to_examples(row, bidirectional=bidirectional):
+                out.write(json.dumps(example, ensure_ascii=False) + "\n")
+                count += 1
+            source_rows += 1
+    return count, source_rows
 
 
 def main():
@@ -102,13 +139,19 @@ def main():
             raise ValueError("--train-input and --validation-input must be provided together.")
         train_source = Path(args.train_input)
         validation_source = Path(args.validation_input)
-        train_count = write_chat_rows(train_source, train_path, limit=args.limit)
-        validation_count = write_chat_rows(validation_source, validation_path, limit=args.limit)
+        train_count, train_source_rows = write_chat_rows(
+            train_source, train_path, limit=args.limit, bidirectional=args.bidirectional
+        )
+        validation_count, validation_source_rows = write_chat_rows(
+            validation_source, validation_path, limit=args.limit, bidirectional=args.bidirectional
+        )
         total = train_count + validation_count
+        total_source_rows = train_source_rows + validation_source_rows
         sources = {"train": str(train_source), "validation": str(validation_source)}
     else:
         rng = random.Random(args.seed)
         total = 0
+        total_source_rows = 0
         train_count = 0
         validation_count = 0
         sources = {"source": str(input_path)}
@@ -117,28 +160,32 @@ def main():
             "w", encoding="utf-8"
         ) as validation_out:
             for row_number, row in enumerate(tqdm(iter_rows(input_path), desc="Preparing rows"), start=1):
-                if args.limit is not None and total >= args.limit:
+                if args.limit is not None and total_source_rows >= args.limit:
                     break
                 validate_row(row, row_number, input_path)
 
-                out_line = json.dumps(row_to_chat(row), ensure_ascii=False) + "\n"
                 if rng.random() < args.validation_ratio:
-                    validation_out.write(out_line)
-                    validation_count += 1
+                    target_out = validation_out
+                    validation_count += len(row_to_examples(row, bidirectional=args.bidirectional))
                 else:
-                    train_out.write(out_line)
-                    train_count += 1
-                total += 1
+                    target_out = train_out
+                    train_count += len(row_to_examples(row, bidirectional=args.bidirectional))
+                for example in row_to_examples(row, bidirectional=args.bidirectional):
+                    target_out.write(json.dumps(example, ensure_ascii=False) + "\n")
+                    total += 1
+                total_source_rows += 1
 
     stats = {
         "sources": sources,
         "train_path": str(train_path),
         "validation_path": str(validation_path),
         "total": total,
+        "source_rows": total_source_rows,
         "train": train_count,
         "validation": validation_count,
         "validation_ratio": args.validation_ratio,
         "seed": args.seed,
+        "bidirectional": args.bidirectional,
     }
     stats_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(stats, indent=2))
