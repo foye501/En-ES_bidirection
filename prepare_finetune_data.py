@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import random
 from pathlib import Path
@@ -15,9 +16,11 @@ SYSTEM_PROMPT = (
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Convert the EN-ES medical translation JSONL file into chat SFT JSONL splits."
+        description="Convert the EN-ES medical translation dataset into chat SFT JSONL splits."
     )
     parser.add_argument("--input", default="azure_dataset.jsonl", help="Source JSONL file.")
+    parser.add_argument("--train-input", default=None, help="Explicit train CSV or JSONL source.")
+    parser.add_argument("--validation-input", default=None, help="Explicit validation CSV or JSONL source.")
     parser.add_argument("--output-dir", default="data/finetune", help="Directory for split JSONL files.")
     parser.add_argument("--validation-ratio", type=float, default=0.02)
     parser.add_argument("--seed", type=int, default=42)
@@ -45,6 +48,45 @@ def row_to_chat(row):
     }
 
 
+def detect_format(path):
+    if path.suffix.lower() == ".csv":
+        return "csv"
+    if path.suffix.lower() in {".jsonl", ".json"}:
+        return "jsonl"
+    raise ValueError(f"Cannot infer dataset format from extension: {path}")
+
+
+def iter_rows(path):
+    source_format = detect_format(path)
+    if source_format == "csv":
+        with path.open("r", encoding="utf-8-sig", newline="") as src:
+            yield from csv.DictReader(src)
+    else:
+        with path.open("r", encoding="utf-8") as src:
+            for line in src:
+                if line.strip():
+                    yield json.loads(line)
+
+
+def validate_row(row, row_number, source):
+    required = {"term", "target_length", "style", "english_scenario", "spanish_translation"}
+    missing = [field for field in required if not row.get(field)]
+    if missing:
+        raise ValueError(f"{source} row {row_number} missing required fields: {missing}")
+
+
+def write_chat_rows(source_path, output_path, limit=None):
+    count = 0
+    with output_path.open("w", encoding="utf-8") as out:
+        for row_number, row in enumerate(tqdm(iter_rows(source_path), desc=f"Preparing {source_path.name}"), start=1):
+            if limit is not None and count >= limit:
+                break
+            validate_row(row, row_number, source_path)
+            out.write(json.dumps(row_to_chat(row), ensure_ascii=False) + "\n")
+            count += 1
+    return count
+
+
 def main():
     args = parse_args()
     input_path = Path(args.input)
@@ -55,38 +97,41 @@ def main():
     validation_path = output_dir / "validation.jsonl"
     stats_path = output_dir / "stats.json"
 
-    rng = random.Random(args.seed)
-    required = {"term", "target_length", "style", "english_scenario", "spanish_translation"}
-    total = 0
-    train_count = 0
-    validation_count = 0
+    if args.train_input or args.validation_input:
+        if not args.train_input or not args.validation_input:
+            raise ValueError("--train-input and --validation-input must be provided together.")
+        train_source = Path(args.train_input)
+        validation_source = Path(args.validation_input)
+        train_count = write_chat_rows(train_source, train_path, limit=args.limit)
+        validation_count = write_chat_rows(validation_source, validation_path, limit=args.limit)
+        total = train_count + validation_count
+        sources = {"train": str(train_source), "validation": str(validation_source)}
+    else:
+        rng = random.Random(args.seed)
+        total = 0
+        train_count = 0
+        validation_count = 0
+        sources = {"source": str(input_path)}
 
-    with input_path.open("r", encoding="utf-8") as src, train_path.open(
-        "w", encoding="utf-8"
-    ) as train_out, validation_path.open("w", encoding="utf-8") as validation_out:
-        for line_number, line in enumerate(tqdm(src, desc="Preparing rows"), start=1):
-            if args.limit is not None and total >= args.limit:
-                break
-            if not line.strip():
-                continue
+        with train_path.open("w", encoding="utf-8") as train_out, validation_path.open(
+            "w", encoding="utf-8"
+        ) as validation_out:
+            for row_number, row in enumerate(tqdm(iter_rows(input_path), desc="Preparing rows"), start=1):
+                if args.limit is not None and total >= args.limit:
+                    break
+                validate_row(row, row_number, input_path)
 
-            row = json.loads(line)
-            missing = required - set(row)
-            if missing:
-                raise ValueError(f"Line {line_number} missing required fields: {sorted(missing)}")
-
-            example = row_to_chat(row)
-            out_line = json.dumps(example, ensure_ascii=False) + "\n"
-            if rng.random() < args.validation_ratio:
-                validation_out.write(out_line)
-                validation_count += 1
-            else:
-                train_out.write(out_line)
-                train_count += 1
-            total += 1
+                out_line = json.dumps(row_to_chat(row), ensure_ascii=False) + "\n"
+                if rng.random() < args.validation_ratio:
+                    validation_out.write(out_line)
+                    validation_count += 1
+                else:
+                    train_out.write(out_line)
+                    train_count += 1
+                total += 1
 
     stats = {
-        "source": str(input_path),
+        "sources": sources,
         "train_path": str(train_path),
         "validation_path": str(validation_path),
         "total": total,

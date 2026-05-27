@@ -1,4 +1,5 @@
 import argparse
+import os
 from pathlib import Path
 
 import torch
@@ -43,6 +44,7 @@ def parse_args():
     parser.add_argument("--logging-steps", type=int, default=10)
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=512)
+    parser.add_argument("--dataloader-num-workers", type=int, default=4)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
@@ -87,9 +89,13 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     quantization_config = None
+    device_map = None
     if args.use_4bit:
         if not torch.cuda.is_available():
             raise RuntimeError("--use-4bit requires CUDA. On Apple Silicon, omit --use-4bit.")
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        device_map = {"": local_rank} if world_size > 1 else "auto"
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
@@ -101,7 +107,7 @@ def main():
         args.model,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16 if has_cuda_bf16() else "auto",
-        device_map="auto" if args.use_4bit else None,
+        device_map=device_map,
         quantization_config=quantization_config,
     )
     model.config.use_cache = False
@@ -166,6 +172,8 @@ def main():
         optim="paged_adamw_8bit" if args.use_4bit else "adamw_torch",
         bf16=has_cuda_bf16(),
         fp16=torch.cuda.is_available() and not has_cuda_bf16(),
+        dataloader_num_workers=args.dataloader_num_workers,
+        ddp_find_unused_parameters=False,
         report_to="none",
         remove_unused_columns=False,
     )
@@ -175,7 +183,7 @@ def main():
         args=training_args,
         train_dataset=tokenized["train"],
         eval_dataset=tokenized["validation"],
-        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True),
+        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True, pad_to_multiple_of=8),
     )
     trainer.train()
     trainer.save_model(str(output_dir / "final"))

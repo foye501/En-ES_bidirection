@@ -24,6 +24,15 @@ On Apple Silicon, install the normal PyTorch build and run without `--use-4bit`.
 
 ## Prepare Data
 
+Use the cleaned train/test CSV split:
+
+```bash
+python prepare_finetune_data.py \
+  --train-input data/azure_dataset_cleaned_train.csv \
+  --validation-input data/azure_dataset_cleaned_test.csv \
+  --output-dir data/finetune
+```
+
 Smoke split with 1,000 examples:
 
 ```bash
@@ -87,3 +96,31 @@ python train_qwen_lora.py \
 ```
 
 The final LoRA adapter is saved under `artifacts/qwen-en-es-lora/final`.
+
+## A100 Multi-GPU Run
+
+On the GPU server, install dependencies, prepare the JSONL files, then launch with 2-4 A100s:
+
+```bash
+source .venv/bin/activate
+NUM_GPUS=4 ./run_a100_finetune.sh
+```
+
+For 2 A100s:
+
+```bash
+NUM_GPUS=2 ./run_a100_finetune.sh
+```
+
+Useful overrides:
+
+```bash
+NUM_GPUS=4 \
+PER_DEVICE_TRAIN_BATCH_SIZE=4 \
+TARGET_EFFECTIVE_BATCH_SIZE=32 \
+MAX_SEQ_LENGTH=1024 \
+NUM_TRAIN_EPOCHS=1 \
+./run_a100_finetune.sh
+```
+
+The default A100 run uses `Qwen/Qwen3-4B-Instruct-2507`, bf16 mixed precision, LoRA, and an effective batch size near 32.
