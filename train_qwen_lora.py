@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=512)
     parser.add_argument("--dataloader-num-workers", type=int, default=4)
+    parser.add_argument("--deepspeed", default=None, help="Optional DeepSpeed config JSON path.")
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
@@ -80,6 +81,8 @@ def has_supervised_tokens(example):
 
 def main():
     args = parse_args()
+    if args.deepspeed and args.use_4bit:
+        raise RuntimeError("This launcher does not support combining --deepspeed with --use-4bit.")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -174,6 +177,7 @@ def main():
         fp16=torch.cuda.is_available() and not has_cuda_bf16(),
         dataloader_num_workers=args.dataloader_num_workers,
         ddp_find_unused_parameters=False,
+        deepspeed=args.deepspeed,
         report_to="none",
         remove_unused_columns=False,
     )

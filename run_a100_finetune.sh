@@ -10,6 +10,8 @@ TRAIN_FILE="${TRAIN_FILE:-data/finetune/train.jsonl}"
 VALIDATION_FILE="${VALIDATION_FILE:-data/finetune/validation.jsonl}"
 OUTPUT_DIR="${OUTPUT_DIR:-artifacts/qwen3-4b-instruct-2507-en-es-lora}"
 MAIN_PROCESS_PORT="${MAIN_PROCESS_PORT:-29500}"
+USE_DEEPSPEED="${USE_DEEPSPEED:-0}"
+DEEPSPEED_CONFIG="${DEEPSPEED_CONFIG:-configs/deepspeed_zero2.json}"
 if [[ -z "${PYTHON:-}" ]]; then
   if [[ -x ".venv/bin/python" ]]; then
     PYTHON=".venv/bin/python"
@@ -68,7 +70,19 @@ TRAIN_ARGS=(
 )
 
 if [[ "${USE_4BIT:-0}" == "1" ]]; then
+  if [[ "$USE_DEEPSPEED" == "1" ]]; then
+    echo "USE_DEEPSPEED=1 cannot be combined with USE_4BIT=1 in this launcher." >&2
+    exit 1
+  fi
   TRAIN_ARGS+=(--use-4bit)
+fi
+
+if [[ "$USE_DEEPSPEED" == "1" ]]; then
+  if [[ ! -f "$DEEPSPEED_CONFIG" ]]; then
+    echo "DeepSpeed config not found: $DEEPSPEED_CONFIG" >&2
+    exit 1
+  fi
+  TRAIN_ARGS+=(--deepspeed "$DEEPSPEED_CONFIG")
 fi
 
 if [[ -n "${LORA_R:-}" ]]; then

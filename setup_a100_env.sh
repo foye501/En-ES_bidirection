@@ -31,6 +31,7 @@ import sys
 import accelerate
 import bitsandbytes
 import datasets
+import deepspeed
 import peft
 import torch
 import transformers
@@ -43,6 +44,7 @@ print(f"accelerate={accelerate.__version__}")
 print(f"peft={peft.__version__}")
 print(f"datasets={datasets.__version__}")
 print(f"bitsandbytes={bitsandbytes.__version__}")
+print(f"deepspeed={deepspeed.__version__}")
 print(f"cuda_available={torch.cuda.is_available()}")
 print(f"cuda_device_count={torch.cuda.device_count()}")
 if torch.cuda.is_available():

@@ -165,6 +165,22 @@ LORA_ALPHA=128 \
 ./run_a100_finetune.sh
 ```
 
+To use DeepSpeed ZeRO-2:
+
+```bash
+NUM_GPUS=1 \
+USE_DEEPSPEED=1 \
+./run_a100_finetune.sh
+```
+
+For real ZeRO-2 sharding benefits, use more than one GPU:
+
+```bash
+NUM_GPUS=4 \
+USE_DEEPSPEED=1 \
+./run_a100_finetune.sh
+```
+
 To use 2-4 A100s:
 
 ```bash
