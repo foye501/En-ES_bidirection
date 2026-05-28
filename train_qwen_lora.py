@@ -39,6 +39,11 @@ def parse_args():
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
     parser.add_argument("--max-steps", type=int, default=-1, help="Use a small value such as 20 for a smoke run.")
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        default=None,
+        help="Checkpoint path or 'true' to resume from the latest checkpoint in output-dir.",
+    )
     parser.add_argument("--eval-steps", type=int, default=100)
     parser.add_argument("--save-steps", type=int, default=100)
     parser.add_argument("--logging-steps", type=int, default=10)
@@ -196,7 +201,10 @@ def main():
         eval_dataset=tokenized["validation"],
         data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True, pad_to_multiple_of=8),
     )
-    trainer.train()
+    resume_from_checkpoint = args.resume_from_checkpoint
+    if resume_from_checkpoint and resume_from_checkpoint.lower() == "true":
+        resume_from_checkpoint = True
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_model(str(output_dir / "final"))
     tokenizer.save_pretrained(str(output_dir / "final"))
     print(f"Saved LoRA adapter and tokenizer to {output_dir / 'final'}")

@@ -231,6 +231,25 @@ NUM_TRAIN_EPOCHS=1 \
 
 The default A100 run uses `Qwen/Qwen3-4B-Instruct-2507`, bf16 mixed precision, LoRA, and an effective batch size near 32.
 
+To continue from a completed 1-epoch run into epoch 2, keep the same output directory and set the total epoch count to 2:
+
+```bash
+NUM_GPUS=4 \
+USE_DEEPSPEED=1 \
+TRAIN_FILE=data/finetune_bidirectional/train.jsonl \
+VALIDATION_FILE=data/finetune_bidirectional/validation.jsonl \
+OUTPUT_DIR=artifacts/qwen3-4b-bidirectional-lora-r64-bs64 \
+NUM_TRAIN_EPOCHS=2 \
+RESUME_FROM_CHECKPOINT=true \
+./run_a100_finetune.sh
+```
+
+To resume from a specific checkpoint:
+
+```bash
+RESUME_FROM_CHECKPOINT=artifacts/qwen3-4b-bidirectional-lora-r64-bs64/checkpoint-7033 ./run_a100_finetune.sh
+```
+
 ## Evaluate 500 Test Cases
 
 After training finishes, evaluate a 500-row sample from the cleaned test set:
