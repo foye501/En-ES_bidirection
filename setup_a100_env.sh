@@ -3,6 +3,8 @@ set -euo pipefail
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-.venv}"
+TORCH_VERSION="${TORCH_VERSION:-2.9.0}"
+TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "Python executable not found: $PYTHON_BIN" >&2
@@ -18,9 +20,8 @@ source "$VENV_DIR/bin/activate"
 
 python -m pip install --upgrade pip
 
-if [[ -n "${TORCH_INDEX_URL:-}" ]]; then
-  python -m pip install torch --index-url "$TORCH_INDEX_URL"
-fi
+python -m pip uninstall -y torch torchvision torchaudio >/dev/null 2>&1 || true
+python -m pip install "torch==$TORCH_VERSION" --index-url "$TORCH_INDEX_URL"
 
 python -m pip install -r requirements.txt
 
@@ -36,6 +37,7 @@ import transformers
 
 print(f"python={sys.version.split()[0]}")
 print(f"torch={torch.__version__}")
+print(f"torch_cuda_build={torch.version.cuda}")
 print(f"transformers={transformers.__version__}")
 print(f"accelerate={accelerate.__version__}")
 print(f"peft={peft.__version__}")

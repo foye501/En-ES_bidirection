@@ -21,8 +21,10 @@ source .venv/bin/activate
 If your server needs an explicit PyTorch CUDA wheel index, pass it through the environment:
 
 ```bash
-TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121 ./setup_a100_env.sh
+TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 ./setup_a100_env.sh
 ```
+
+The setup script defaults to `torch==2.9.0` from the CUDA 12.8 PyTorch index. This avoids accidentally installing newer CUDA 13 wheels on servers whose NVIDIA driver only supports CUDA 12.x.
 
 Conda alternative:
 
