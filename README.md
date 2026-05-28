@@ -188,3 +188,21 @@ NUM_TRAIN_EPOCHS=1 \
 ```
 
 The default A100 run uses `Qwen/Qwen3-4B-Instruct-2507`, bf16 mixed precision, LoRA, and an effective batch size near 32.
+
+## Evaluate 500 Test Cases
+
+After training finishes, evaluate a 500-row sample from the cleaned test set:
+
+```bash
+python evaluate_translation_sample.py \
+  --adapter artifacts/qwen3-4b-instruct-2507-en-es-lora/final \
+  --test-file data/azure_dataset_cleaned_test.csv \
+  --sample-size 500 \
+  --direction both \
+  --batch-size 8 \
+  --output-dir artifacts/eval_sample_500
+```
+
+For EN-ES only, use `--direction en-es`. For ES-EN only, use `--direction es-en`.
+
+The script writes `predictions.csv` with source, reference, and model output, plus `summary.json` with exact-match, token-F1, and chrF-like scores.
