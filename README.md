@@ -267,3 +267,17 @@ python evaluate_translation_sample.py \
 For EN-ES only, use `--direction en-es`. For ES-EN only, use `--direction es-en`.
 
 The script writes `predictions.csv` with source, reference, and model output, plus `summary.json` with exact-match, token-F1, and chrF-like scores.
+
+To evaluate the original base model on the same sampled cases, omit `--adapter` and keep the same `--seed`, `--sample-size`, and `--direction`:
+
+```bash
+python evaluate_translation_sample.py \
+  --test-file data/azure_dataset_cleaned_test.csv \
+  --sample-size 500 \
+  --seed 42 \
+  --direction both \
+  --batch-size 8 \
+  --output-dir artifacts/eval_sample_500_base
+```
+
+Compare `artifacts/eval_sample_500_base/predictions.csv` with the fine-tuned `predictions.csv`. Both files include `row_index` so rows can be matched directly.

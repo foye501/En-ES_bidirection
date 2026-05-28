@@ -16,9 +16,9 @@ from train_qwen_lora import DEFAULT_MODEL, has_cuda_bf16
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Sample test rows and evaluate a LoRA translation adapter.")
+    parser = argparse.ArgumentParser(description="Sample test rows and evaluate base or LoRA translation outputs.")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--adapter", required=True, help="Path to the trained LoRA adapter directory.")
+    parser.add_argument("--adapter", default=None, help="Optional path to a trained LoRA adapter directory.")
     parser.add_argument("--test-file", default="data/azure_dataset_cleaned_test.csv")
     parser.add_argument("--output-dir", default="artifacts/eval_sample_500")
     parser.add_argument("--sample-size", type=int, default=500)
@@ -84,7 +84,11 @@ def chrf_like(prediction, reference, max_order=6, beta=2.0):
 
 def read_test_rows(path):
     with Path(path).open("r", encoding="utf-8-sig", newline="") as src:
-        return list(csv.DictReader(src))
+        rows = []
+        for row_index, row in enumerate(csv.DictReader(src)):
+            row["row_index"] = row_index
+            rows.append(row)
+        return rows
 
 
 def expand_directions(rows, direction):
@@ -98,6 +102,7 @@ def expand_directions(rows, direction):
             examples.append(
                 {
                     "direction": item_direction,
+                    "row_index": row["row_index"],
                     "term": row["term"],
                     "target_length": row["target_length"],
                     "style": row["style"],
@@ -130,9 +135,12 @@ def load_model(model_id, adapter_path, merge_adapter):
         torch_dtype=torch.bfloat16 if has_cuda_bf16() else "auto",
         device_map="auto" if torch.cuda.is_available() else None,
     )
-    model = PeftModel.from_pretrained(model, adapter_path)
-    if merge_adapter:
-        model = model.merge_and_unload()
+    if adapter_path:
+        model = PeftModel.from_pretrained(model, adapter_path)
+        if merge_adapter:
+            model = model.merge_and_unload()
+    elif merge_adapter:
+        raise ValueError("--merge-adapter requires --adapter.")
     if device != "cuda":
         model = model.to(device)
     model.eval()
@@ -213,6 +221,7 @@ def main():
             results.append(
                 {
                     "direction": example["direction"],
+                    "row_index": example["row_index"],
                     "term": example["term"],
                     "target_length": example["target_length"],
                     "style": example["style"],
