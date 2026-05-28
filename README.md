@@ -26,6 +26,18 @@ TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 ./setup_a100_env.sh
 
 The setup script defaults to `torch==2.9.0` from the CUDA 12.8 PyTorch index. This avoids accidentally installing newer CUDA 13 wheels on servers whose NVIDIA driver only supports CUDA 12.x.
 
+To install FlashAttention-2 during setup:
+
+```bash
+INSTALL_FLASH_ATTN=1 ./setup_a100_env.sh
+```
+
+If compilation uses too much CPU RAM, limit parallel build jobs:
+
+```bash
+INSTALL_FLASH_ATTN=1 FLASH_ATTN_MAX_JOBS=4 ./setup_a100_env.sh
+```
+
 Conda alternative:
 
 ```bash

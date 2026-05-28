@@ -25,6 +25,11 @@ python -m pip install "torch==$TORCH_VERSION" --index-url "$TORCH_INDEX_URL"
 
 python -m pip install -r requirements.txt
 
+if [[ "${INSTALL_FLASH_ATTN:-0}" == "1" ]]; then
+  python -m pip install --upgrade packaging ninja wheel setuptools
+  MAX_JOBS="${FLASH_ATTN_MAX_JOBS:-8}" python -m pip install flash-attn --no-build-isolation
+fi
+
 python - <<'PY'
 import sys
 
@@ -35,6 +40,10 @@ import deepspeed
 import peft
 import torch
 import transformers
+try:
+    import flash_attn
+except ImportError:
+    flash_attn = None
 
 print(f"python={sys.version.split()[0]}")
 print(f"torch={torch.__version__}")
@@ -45,6 +54,7 @@ print(f"peft={peft.__version__}")
 print(f"datasets={datasets.__version__}")
 print(f"bitsandbytes={bitsandbytes.__version__}")
 print(f"deepspeed={deepspeed.__version__}")
+print(f"flash_attn={flash_attn.__version__ if flash_attn else 'not installed'}")
 print(f"cuda_available={torch.cuda.is_available()}")
 print(f"cuda_device_count={torch.cuda.device_count()}")
 if torch.cuda.is_available():
