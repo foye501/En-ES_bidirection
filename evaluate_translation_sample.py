@@ -11,7 +11,7 @@ from peft import PeftModel
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from prepare_finetune_data import row_to_chat
+from prepare_finetune_data import SYSTEM_PROMPTS, row_to_chat
 from train_qwen_lora import DEFAULT_MODEL, has_cuda_bf16
 
 
@@ -19,6 +19,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Sample test rows and evaluate base or LoRA translation outputs.")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--adapter", default=None, help="Optional path to a trained LoRA adapter directory.")
+    parser.add_argument(
+        "--cases-file",
+        default=None,
+        help="Existing predictions/cases CSV to reuse in order instead of sampling from --test-file.",
+    )
     parser.add_argument("--test-file", default="data/azure_dataset_cleaned_test.csv")
     parser.add_argument("--output-dir", default="artifacts/eval_sample_500")
     parser.add_argument("--sample-size", type=int, default=500)
@@ -114,6 +119,51 @@ def expand_directions(rows, direction):
     return examples
 
 
+def read_cases_file(path, direction):
+    directions = {"en-es", "es-en"} if direction == "both" else {direction}
+    examples = []
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as src:
+        reader = csv.DictReader(src)
+        required = {"direction", "source_text", "reference_text"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"{path} is missing required columns: {sorted(missing)}")
+
+        for case_index, row in enumerate(reader):
+            item_direction = row["direction"]
+            if item_direction not in directions:
+                continue
+            if item_direction == "en-es":
+                source_language = "English"
+            elif item_direction == "es-en":
+                source_language = "Spanish"
+            else:
+                raise ValueError(f"Unsupported direction in {path}: {item_direction}")
+
+            user = (
+                f"Direction: {'English to Spanish' if item_direction == 'en-es' else 'Spanish to English'}\n"
+                f"Style: {row.get('style', '')}\n"
+                f"Target length: about {row.get('target_length', '')} words\n"
+                f"{source_language}: {row['source_text']}"
+            )
+            examples.append(
+                {
+                    "direction": item_direction,
+                    "row_index": row.get("row_index", str(case_index)),
+                    "term": row.get("term", ""),
+                    "target_length": row.get("target_length", ""),
+                    "style": row.get("style", ""),
+                    "source_text": row["source_text"],
+                    "reference_text": row["reference_text"],
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPTS[item_direction]},
+                        {"role": "user", "content": user},
+                    ],
+                }
+            )
+    return examples
+
+
 def get_device():
     if torch.cuda.is_available():
         return "cuda"
@@ -195,11 +245,16 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = read_test_rows(args.test_file)
-    if args.sample_size > len(rows):
-        raise ValueError(f"Requested {args.sample_size} rows, but {args.test_file} has only {len(rows)} rows.")
-    sampled_rows = random.Random(args.seed).sample(rows, args.sample_size)
-    examples = expand_directions(sampled_rows, args.direction)
+    if args.cases_file:
+        examples = read_cases_file(args.cases_file, args.direction)
+    else:
+        rows = read_test_rows(args.test_file)
+        if args.sample_size > len(rows):
+            raise ValueError(f"Requested {args.sample_size} rows, but {args.test_file} has only {len(rows)} rows.")
+        sampled_rows = random.Random(args.seed).sample(rows, args.sample_size)
+        examples = expand_directions(sampled_rows, args.direction)
+    if not examples:
+        raise ValueError("No evaluation examples were selected.")
 
     model, tokenizer, device = load_model(args.model, args.adapter, args.merge_adapter)
     print(f"Loaded model on {device}. Evaluating {len(examples)} examples.")

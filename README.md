@@ -281,3 +281,13 @@ python evaluate_translation_sample.py \
 ```
 
 Compare `artifacts/eval_sample_500_base/predictions.csv` with the fine-tuned `predictions.csv`. Both files include `row_index` so rows can be matched directly.
+
+To reuse an existing fine-tuned `predictions.csv` exactly, including its case order:
+
+```bash
+python evaluate_translation_sample.py \
+  --cases-file artifacts/eval_sample_500/predictions.csv \
+  --direction both \
+  --batch-size 8 \
+  --output-dir artifacts/eval_sample_500_base_same_cases
+```
