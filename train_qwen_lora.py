@@ -46,6 +46,12 @@ def parse_args():
     parser.add_argument("--max-eval-samples", type=int, default=512)
     parser.add_argument("--dataloader-num-workers", type=int, default=4)
     parser.add_argument("--deepspeed", default=None, help="Optional DeepSpeed config JSON path.")
+    parser.add_argument(
+        "--attn-implementation",
+        default=None,
+        choices=["eager", "sdpa", "flash_attention_2"],
+        help="Optional Transformers attention implementation.",
+    )
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
@@ -112,6 +118,7 @@ def main():
         torch_dtype=torch.bfloat16 if has_cuda_bf16() else "auto",
         device_map=device_map,
         quantization_config=quantization_config,
+        attn_implementation=args.attn_implementation,
     )
     model.config.use_cache = False
     if args.use_4bit:

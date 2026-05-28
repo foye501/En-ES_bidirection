@@ -69,6 +69,10 @@ TRAIN_ARGS=(
   --logging-steps "${LOGGING_STEPS:-10}"
 )
 
+if [[ -n "${ATTN_IMPLEMENTATION:-}" ]]; then
+  TRAIN_ARGS+=(--attn-implementation "$ATTN_IMPLEMENTATION")
+fi
+
 if [[ "${USE_4BIT:-0}" == "1" ]]; then
   if [[ "$USE_DEEPSPEED" == "1" ]]; then
     echo "USE_DEEPSPEED=1 cannot be combined with USE_4BIT=1 in this launcher." >&2

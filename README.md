@@ -173,6 +173,18 @@ USE_DEEPSPEED=1 \
 ./run_a100_finetune.sh
 ```
 
+To choose the attention implementation:
+
+```bash
+ATTN_IMPLEMENTATION=sdpa ./run_a100_finetune.sh
+```
+
+For FlashAttention-2, install `flash-attn` on the A100 server first, then run:
+
+```bash
+ATTN_IMPLEMENTATION=flash_attention_2 ./run_a100_finetune.sh
+```
+
 For real ZeRO-2 sharding benefits, use more than one GPU:
 
 ```bash
