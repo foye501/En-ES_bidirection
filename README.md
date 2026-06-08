@@ -231,6 +231,25 @@ NUM_TRAIN_EPOCHS=1 \
 
 The default A100 run uses `Qwen/Qwen3-4B-Instruct-2507`, bf16 mixed precision, LoRA, and an effective batch size near 32.
 
+## Qwen2.5 1.5B Run
+
+To train the smaller `Qwen/Qwen2.5-1.5B-Instruct` model on the same bidirectional data:
+
+```bash
+NUM_GPUS=2 \
+USE_DEEPSPEED=1 \
+ATTN_IMPLEMENTATION=sdpa \
+./run_qwen25_15b_finetune.sh
+```
+
+For the first 1.5B run, do not set `RESUME_FROM_CHECKPOINT=true` unless the output directory already has checkpoints for this exact model. To resume the same 1.5B run later:
+
+```bash
+NUM_TRAIN_EPOCHS=2 \
+RESUME_FROM_CHECKPOINT=true \
+./run_qwen25_15b_finetune.sh
+```
+
 To continue from a completed 1-epoch run into epoch 2, keep the same output directory and set the total epoch count to 2:
 
 ```bash
