@@ -27,6 +27,19 @@ TARGET_MODULES = [
 ]
 
 
+class ScalarLossTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        loss, outputs = super().compute_loss(
+            model,
+            inputs,
+            return_outputs=True,
+            num_items_in_batch=num_items_in_batch,
+        )
+        if torch.is_tensor(loss) and loss.dim() != 0:
+            loss = loss.mean()
+        return (loss, outputs) if return_outputs else loss
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune Qwen for EN-ES medical translation with LoRA.")
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -90,6 +103,21 @@ def has_supervised_tokens(example):
     return any(label != -100 for label in example["labels"])
 
 
+def enable_input_require_grads(model):
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+        return
+
+    embeddings = model.get_input_embeddings() if hasattr(model, "get_input_embeddings") else None
+    if embeddings is None:
+        return
+
+    def make_inputs_require_grad(_module, _inputs, output):
+        output.requires_grad_(True)
+
+    embeddings.register_forward_hook(make_inputs_require_grad)
+
+
 def main():
     args = parse_args()
     if args.deepspeed and args.use_4bit:
@@ -138,6 +166,7 @@ def main():
         target_modules=TARGET_MODULES,
     )
     model = get_peft_model(model, lora_config)
+    enable_input_require_grads(model)
     model.print_trainable_parameters()
 
     dataset = load_dataset(
@@ -184,6 +213,7 @@ def main():
         save_steps=args.save_steps,
         save_total_limit=3,
         gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         optim="paged_adamw_8bit" if args.use_4bit else "adamw_torch",
         bf16=has_cuda_bf16(),
         fp16=torch.cuda.is_available() and not has_cuda_bf16(),
@@ -194,7 +224,7 @@ def main():
         remove_unused_columns=False,
     )
 
-    trainer = Trainer(
+    trainer = ScalarLossTrainer(
         model=model,
         args=training_args,
         train_dataset=tokenized["train"],
