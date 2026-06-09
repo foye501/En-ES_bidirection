@@ -284,9 +284,16 @@ python sample_quantization_data.py \
 The sampler writes:
 
 - `calibration_prompts.jsonl`: structured prompt, full text, reference, direction, and metadata
+- `calibration_mtk_prompt_only.jsonl`: MTK-style JSONL records with `id`, Qwen chat-template `text`, `task`, `mode`, `bucket`, and `token_length`
 - `calibration_prompts.txt`: prompt-only flattened text, one sample per line
 - `calibration_full_texts.txt`: prompt plus reference translation, one sample per line
 - `stats.json`: sampling counts and output paths
+
+Use `calibration_mtk_prompt_only.jsonl` for MTK NPU calibration when the tool expects JSONL records like:
+
+```json
+{"id": "1_prompt_only", "text": "<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n...<|im_end|>\n", "task": "medical_translation_en_es", "dataset_version": null, "mode": "prompt_only", "bucket": "0_512", "token_length": 256, "source_line_no": 1, "meeting_id": null, "segment_id": null}
+```
 
 Use `calibration_full_texts.txt` when the quantization tool wants representative model text sequences. Use `calibration_prompts.txt` when it wants inference-style prompts only.
 

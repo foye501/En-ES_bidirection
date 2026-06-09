@@ -23,6 +23,16 @@ def parse_args():
         action="store_true",
         help="Disable balancing by metadata.direction.",
     )
+    parser.add_argument(
+        "--task-prefix",
+        default="medical_translation",
+        help="Task name prefix used in MTK-style calibration records.",
+    )
+    parser.add_argument(
+        "--dataset-version",
+        default=None,
+        help="Optional dataset_version value for MTK-style calibration records.",
+    )
     return parser.parse_args()
 
 
@@ -77,6 +87,17 @@ def fallback_chat_text(messages, add_generation_prompt=False):
     return "\n".join(parts)
 
 
+def qwen_prompt_only_text(messages):
+    parts = []
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant":
+            continue
+        content = message.get("content", "")
+        parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
+    return "\n".join(parts) + "\n"
+
+
 def format_texts(row, tokenizer):
     prompt_messages, reference = split_messages(row)
     full_messages = list(prompt_messages)
@@ -95,6 +116,46 @@ def format_texts(row, tokenizer):
         full_text = fallback_chat_text(full_messages)
 
     return prompt, full_text, reference
+
+
+def count_tokens(text, tokenizer):
+    if tokenizer is None:
+        return len(text.split())
+    return len(tokenizer(text, add_special_tokens=False)["input_ids"])
+
+
+def length_bucket(token_length):
+    buckets = [
+        (512, "0_512"),
+        (1024, "512_1k"),
+        (2048, "1k_2k"),
+        (4096, "2k_4k"),
+        (6144, "4k_6k"),
+        (8192, "6k_8k"),
+    ]
+    for upper_bound, label in buckets:
+        if token_length <= upper_bound:
+            return label
+    return "8k_plus"
+
+
+def mtk_record(sample_id, source_index, row, prompt_messages, tokenizer, task_prefix, dataset_version):
+    direction = get_direction(row)
+    text = qwen_prompt_only_text(prompt_messages)
+    token_length = count_tokens(text, tokenizer)
+    task_direction = direction.replace("-", "_")
+    return {
+        "id": f"{sample_id + 1}_prompt_only",
+        "text": text,
+        "task": f"{task_prefix}_{task_direction}",
+        "dataset_version": dataset_version,
+        "mode": "prompt_only",
+        "bucket": length_bucket(token_length),
+        "token_length": token_length,
+        "source_line_no": source_index + 1,
+        "meeting_id": None,
+        "segment_id": None,
+    }
 
 
 def flatten_text(text):
@@ -146,16 +207,21 @@ def main():
     tokenizer = load_tokenizer(args.model)
 
     jsonl_path = output_dir / "calibration_prompts.jsonl"
+    mtk_jsonl_path = output_dir / "calibration_mtk_prompt_only.jsonl"
     prompt_txt_path = output_dir / "calibration_prompts.txt"
     full_txt_path = output_dir / "calibration_full_texts.txt"
     stats_path = output_dir / "stats.json"
 
     direction_counts = defaultdict(int)
-    with jsonl_path.open("w", encoding="utf-8") as jsonl_out, prompt_txt_path.open(
+    bucket_counts = defaultdict(int)
+    with jsonl_path.open("w", encoding="utf-8") as jsonl_out, mtk_jsonl_path.open(
+        "w", encoding="utf-8"
+    ) as mtk_jsonl_out, prompt_txt_path.open(
         "w", encoding="utf-8"
     ) as prompt_out, full_txt_path.open("w", encoding="utf-8") as full_out:
         for sample_id, (source_index, row) in enumerate(sampled):
             prompt, full_text, reference = format_texts(row, tokenizer)
+            prompt_messages, _reference = split_messages(row)
             direction = get_direction(row)
             direction_counts[direction] += 1
             record = {
@@ -167,7 +233,18 @@ def main():
                 "reference": reference,
                 "metadata": row.get("metadata", {}),
             }
+            mtk_row = mtk_record(
+                sample_id,
+                source_index,
+                row,
+                prompt_messages,
+                tokenizer,
+                args.task_prefix,
+                args.dataset_version,
+            )
+            bucket_counts[mtk_row["bucket"]] += 1
             jsonl_out.write(json.dumps(record, ensure_ascii=False) + "\n")
+            mtk_jsonl_out.write(json.dumps(mtk_row, ensure_ascii=False) + "\n")
             prompt_out.write(flatten_text(prompt) + "\n")
             full_out.write(flatten_text(full_text) + "\n")
 
@@ -179,9 +256,12 @@ def main():
         "seed": args.seed,
         "balanced_by_direction": not args.no_balance,
         "model_chat_template": args.model,
+        "token_length_method": "tokenizer" if tokenizer is not None else "whitespace_fallback",
         "direction_counts": dict(sorted(direction_counts.items())),
+        "bucket_counts": dict(sorted(bucket_counts.items())),
         "outputs": {
             "jsonl": str(jsonl_path),
+            "mtk_prompt_only_jsonl": str(mtk_jsonl_path),
             "prompt_text": str(prompt_txt_path),
             "full_text": str(full_txt_path),
         },
