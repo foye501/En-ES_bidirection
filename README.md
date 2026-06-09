@@ -338,3 +338,19 @@ python evaluate_translation_sample.py \
   --batch-size 8 \
   --output-dir artifacts/eval_sample_500_base_same_cases
 ```
+
+To evaluate the fine-tuned Qwen2.5 1.5B adapter:
+
+```bash
+python evaluate_translation_sample.py \
+  --adapter artifacts/qwen2.5-1.5b-bidirectional-lora-r64-bs64-v2/final \
+  --test-file data/azure_dataset_cleaned_test.csv \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --sample-size 500 \
+  --seed 42 \
+  --direction both \
+  --batch-size 8 \
+  --output-dir artifacts/eval_sample_500_finetuned_1.5b
+```
+
+When `--adapter` is set and `--model` is omitted, the evaluator reads the adapter's `adapter_config.json` and uses the original training base model automatically. If `--model` differs from the adapter base model, the script raises an error by default.

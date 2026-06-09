@@ -17,7 +17,11 @@ from train_qwen_lora import DEFAULT_MODEL, has_cuda_bf16
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Sample test rows and evaluate base or LoRA translation outputs.")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Base model id/path. If --adapter is set and --model is omitted, this is read from adapter_config.json.",
+    )
     parser.add_argument("--adapter", default=None, help="Optional path to a trained LoRA adapter directory.")
     parser.add_argument(
         "--cases-file",
@@ -33,6 +37,11 @@ def parse_args():
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--merge-adapter", action="store_true", help="Merge LoRA weights for faster inference.")
+    parser.add_argument(
+        "--allow-model-mismatch",
+        action="store_true",
+        help="Allow --model to differ from the adapter's base_model_name_or_path.",
+    )
     return parser.parse_args()
 
 
@@ -172,6 +181,35 @@ def get_device():
     return "cpu"
 
 
+def normalize_model_id(model_id):
+    return str(model_id).rstrip("/")
+
+
+def get_adapter_base_model(adapter_path):
+    if not adapter_path:
+        return None
+    config_path = Path(adapter_path) / "adapter_config.json"
+    if not config_path.exists():
+        return None
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    return config.get("base_model_name_or_path")
+
+
+def resolve_model_id(model_arg, adapter_path, allow_model_mismatch):
+    adapter_base_model = get_adapter_base_model(adapter_path)
+    if adapter_base_model:
+        if not model_arg:
+            print(f"Using adapter base model from adapter_config.json: {adapter_base_model}")
+            return adapter_base_model
+        if normalize_model_id(model_arg) != normalize_model_id(adapter_base_model) and not allow_model_mismatch:
+            raise ValueError(
+                "Adapter/base model mismatch. "
+                f"The adapter was trained from {adapter_base_model!r}, but --model is {model_arg!r}. "
+                "Use the adapter base model or pass --allow-model-mismatch only if this is intentional."
+            )
+    return model_arg or DEFAULT_MODEL
+
+
 def load_model(model_id, adapter_path, merge_adapter):
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     tokenizer.padding_side = "left"
@@ -256,7 +294,8 @@ def main():
     if not examples:
         raise ValueError("No evaluation examples were selected.")
 
-    model, tokenizer, device = load_model(args.model, args.adapter, args.merge_adapter)
+    model_id = resolve_model_id(args.model, args.adapter, args.allow_model_mismatch)
+    model, tokenizer, device = load_model(model_id, args.adapter, args.merge_adapter)
     print(f"Loaded model on {device}. Evaluating {len(examples)} examples.")
 
     results = []
