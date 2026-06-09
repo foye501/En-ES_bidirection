@@ -269,6 +269,27 @@ To resume from a specific checkpoint:
 RESUME_FROM_CHECKPOINT=artifacts/qwen3-4b-bidirectional-lora-r64-bs64/checkpoint-7033 ./run_a100_finetune.sh
 ```
 
+## Quantization Calibration Sample
+
+For MTK NPU quantization, create a small representative calibration set from the bidirectional training JSONL:
+
+```bash
+python sample_quantization_data.py \
+  --input data/finetune_bidirectional/train.jsonl \
+  --sample-size 128 \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --output-dir data/quantization/qwen25_15b_calibration_128
+```
+
+The sampler writes:
+
+- `calibration_prompts.jsonl`: structured prompt, full text, reference, direction, and metadata
+- `calibration_prompts.txt`: prompt-only flattened text, one sample per line
+- `calibration_full_texts.txt`: prompt plus reference translation, one sample per line
+- `stats.json`: sampling counts and output paths
+
+Use `calibration_full_texts.txt` when the quantization tool wants representative model text sequences. Use `calibration_prompts.txt` when it wants inference-style prompts only.
+
 ## Evaluate 500 Test Cases
 
 After training finishes, evaluate a 500-row sample from the cleaned test set:
