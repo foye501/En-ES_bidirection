@@ -235,6 +235,21 @@ def load_model(model_id, adapter_path, merge_adapter):
     return model, tokenizer, device
 
 
+def generation_eos_token_ids(tokenizer):
+    token_ids = []
+    for token_id in [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|im_end|>")]:
+        if token_id is not None and token_id != tokenizer.unk_token_id and token_id not in token_ids:
+            token_ids.append(token_id)
+    return token_ids[0] if len(token_ids) == 1 else token_ids
+
+
+def clean_prediction(text):
+    for stop_text in ["<|im_end|>", "<|endoftext|>", "<|im_start|>"]:
+        if stop_text in text:
+            text = text.split(stop_text, 1)[0]
+    return text.strip()
+
+
 def generate_batch(model, tokenizer, device, examples, max_new_tokens, temperature):
     prompts = [
         tokenizer.apply_chat_template(example["messages"], tokenize=False, add_generation_prompt=True)
@@ -245,7 +260,7 @@ def generate_batch(model, tokenizer, device, examples, max_new_tokens, temperatu
         "max_new_tokens": max_new_tokens,
         "do_sample": temperature > 0,
         "pad_token_id": tokenizer.pad_token_id,
-        "eos_token_id": tokenizer.eos_token_id,
+        "eos_token_id": generation_eos_token_ids(tokenizer),
     }
     if temperature > 0:
         generation_kwargs["temperature"] = temperature
@@ -256,7 +271,8 @@ def generate_batch(model, tokenizer, device, examples, max_new_tokens, temperatu
     for index in range(len(prompts)):
         input_length = inputs.input_ids[index].shape[0]
         generated_tokens = outputs[index][input_length:]
-        predictions.append(tokenizer.decode(generated_tokens, skip_special_tokens=True).strip())
+        prediction = tokenizer.decode(generated_tokens, skip_special_tokens=False)
+        predictions.append(clean_prediction(prediction))
     return predictions
 
 
