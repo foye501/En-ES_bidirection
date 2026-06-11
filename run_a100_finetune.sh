@@ -77,6 +77,10 @@ if [[ -n "${RESUME_FROM_CHECKPOINT:-}" ]]; then
   TRAIN_ARGS+=(--resume-from-checkpoint "$RESUME_FROM_CHECKPOINT")
 fi
 
+if [[ -n "${ADAPTER:-}" ]]; then
+  TRAIN_ARGS+=(--adapter "$ADAPTER")
+fi
+
 if [[ "${USE_4BIT:-0}" == "1" ]]; then
   if [[ "$USE_DEEPSPEED" == "1" ]]; then
     echo "USE_DEEPSPEED=1 cannot be combined with USE_4BIT=1 in this launcher." >&2

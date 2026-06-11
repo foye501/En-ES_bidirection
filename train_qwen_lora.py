@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -46,6 +46,7 @@ def parse_args():
     parser.add_argument("--train-file", default="data/finetune/train.jsonl")
     parser.add_argument("--validation-file", default="data/finetune/validation.jsonl")
     parser.add_argument("--output-dir", default="artifacts/qwen-en-es-lora")
+    parser.add_argument("--adapter", default=None, help="Optional existing LoRA adapter to continue training.")
     parser.add_argument("--max-seq-length", type=int, default=512)
     parser.add_argument("--per-device-train-batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=16)
@@ -157,15 +158,19 @@ def main():
     if args.use_4bit:
         model = prepare_model_for_kbit_training(model)
 
-    lora_config = LoraConfig(
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=args.lora_dropout,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=TARGET_MODULES,
-    )
-    model = get_peft_model(model, lora_config)
+    if args.adapter:
+        model = PeftModel.from_pretrained(model, args.adapter, is_trainable=True)
+        print(f"Loaded trainable LoRA adapter from {args.adapter}")
+    else:
+        lora_config = LoraConfig(
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=TARGET_MODULES,
+        )
+        model = get_peft_model(model, lora_config)
     enable_input_require_grads(model)
     model.print_trainable_parameters()
 

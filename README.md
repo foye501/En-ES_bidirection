@@ -269,6 +269,45 @@ To resume from a specific checkpoint:
 RESUME_FROM_CHECKPOINT=artifacts/qwen3-4b-bidirectional-lora-r64-bs64/checkpoint-7033 ./run_a100_finetune.sh
 ```
 
+## EN-ES Upsampling
+
+If EN-ES quality lags ES-EN, create a direction-weighted training file from the existing bidirectional JSONL. This keeps validation unchanged and changes only the training mix:
+
+```bash
+python upsample_bidirectional_data.py \
+  --train-file data/finetune_bidirectional/train.jsonl \
+  --validation-file data/finetune_bidirectional/validation.jsonl \
+  --output-dir data/finetune_bidirectional_en_es_x2 \
+  --en-es-repeat 2 \
+  --es-en-repeat 1
+```
+
+`--en-es-repeat 2 --es-en-repeat 1` makes the train mix about 67% EN-ES and 33% ES-EN. For a gentler 60/40 mix, use `--en-es-repeat 3 --es-en-repeat 2`.
+
+For a second-stage 1.5B Instruct run, start from the completed 50/50 adapter but use a new output directory and a lower learning rate. Do not use `RESUME_FROM_CHECKPOINT=true` when changing the train data mix:
+
+```bash
+unset RESUME_FROM_CHECKPOINT
+
+NUM_GPUS=2 \
+USE_DEEPSPEED=1 \
+ATTN_IMPLEMENTATION=sdpa \
+MODEL=Qwen/Qwen2.5-1.5B-Instruct \
+ADAPTER=artifacts/qwen2.5-1.5b-instruct-bidirectional-lora-r64-bs64/final \
+OUTPUT_DIR=artifacts/qwen2.5-1.5b-instruct-en-es-x2-stage2-lora-r64-bs64 \
+TRAIN_FILE=data/finetune_bidirectional_en_es_x2/train.jsonl \
+VALIDATION_FILE=data/finetune_bidirectional_en_es_x2/validation.jsonl \
+LORA_R=64 \
+LORA_ALPHA=128 \
+PER_DEVICE_TRAIN_BATCH_SIZE=16 \
+TARGET_EFFECTIVE_BATCH_SIZE=64 \
+LEARNING_RATE=5e-5 \
+NUM_TRAIN_EPOCHS=0.5 \
+./run_qwen25_15b_finetune.sh
+```
+
+Evaluate the new stage on the same cases as the 50/50 run. Keep it only if EN-ES improves without a meaningful ES-EN regression.
+
 ## Quantization Calibration Sample
 
 For MTK NPU quantization, create a small representative calibration set from the bidirectional training JSONL:
