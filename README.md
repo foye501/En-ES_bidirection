@@ -437,3 +437,18 @@ python evaluate_translation_sample.py \
 ```
 
 When `--adapter` is set and `--model` is omitted, the evaluator reads the adapter's `adapter_config.json` and uses the original training base model automatically. If `--model` differs from the adapter base model, the script raises an error by default.
+
+## Translate Prompt JSONL
+
+For prompt-only JSONL files such as ASR transcript prompts, use `translate_prompt_jsonl.py` instead of `evaluate_translation_sample.py`:
+
+```bash
+python translate_prompt_jsonl.py \
+  --input artifacts/nemo_asr_transcripts/nemo_asr_en_es_translation_prompts.jsonl \
+  --adapter artifacts/qwen3-4b-bidirectional-lora-r64-bs64/final \
+  --model Qwen/Qwen3-4B-Instruct-2507 \
+  --batch-size 8 \
+  --output-dir artifacts/qwen3_4b_adapter_translate_asr
+```
+
+The script writes `translations.csv` and `translations.jsonl` with segment metadata, source text, and translated output.
