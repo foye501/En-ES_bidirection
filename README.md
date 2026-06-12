@@ -250,6 +250,50 @@ RESUME_FROM_CHECKPOINT=true \
 ./run_qwen25_15b_finetune.sh
 ```
 
+## Llama 3.2 3B Run
+
+To compare against Llama 3.2 3B Instruct on the same bidirectional data:
+
+```bash
+NUM_GPUS=2 \
+USE_DEEPSPEED=1 \
+ATTN_IMPLEMENTATION=sdpa \
+./run_llama32_3b_finetune.sh
+```
+
+Meta Llama models may require Hugging Face authentication before download:
+
+```bash
+huggingface-cli login
+```
+
+To evaluate the raw Llama 3.2 3B Instruct model on exactly the same 400-case file used for Qwen scoring, reuse the existing predictions/cases CSV:
+
+```bash
+CASES_FILE=artifacts/eval_sample_400_qwen1.5b/predictions.csv
+
+python evaluate_translation_sample.py \
+  --cases-file "$CASES_FILE" \
+  --model meta-llama/Llama-3.2-3B-Instruct \
+  --direction both \
+  --batch-size 8 \
+  --output-dir artifacts/eval_sample_400_llama3.2_3b_base_same_cases
+```
+
+After fine-tuning, evaluate the Llama adapter on those same cases:
+
+```bash
+CASES_FILE=artifacts/eval_sample_400_qwen1.5b/predictions.csv
+
+python evaluate_translation_sample.py \
+  --cases-file "$CASES_FILE" \
+  --adapter artifacts/llama3.2-3b-instruct-bidirectional-lora-r64-bs64/final \
+  --model meta-llama/Llama-3.2-3B-Instruct \
+  --direction both \
+  --batch-size 8 \
+  --output-dir artifacts/eval_sample_400_llama3.2_3b_finetuned_same_cases
+```
+
 To continue from a completed 1-epoch run into epoch 2, keep the same output directory and set the total epoch count to 2:
 
 ```bash
