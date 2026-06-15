@@ -352,6 +352,46 @@ NUM_TRAIN_EPOCHS=0.5 \
 
 Evaluate the new stage on the same cases as the 50/50 run. Keep it only if EN-ES improves without a meaningful ES-EN regression.
 
+## Refined Term Repair Stage
+
+To train on every row in the refined term dataset, write all refined examples to `train.jsonl` and use a separate validation file only for monitoring:
+
+```bash
+python prepare_finetune_data.py \
+  --input data/azure_dataset_refined_experiment.csv \
+  --output-dir data/finetune_refined_experiment_en_es_all_terms \
+  --train-all \
+  --seed 42
+
+cp data/finetune/validation.jsonl data/finetune_refined_experiment_en_es_all_terms/validation.jsonl
+```
+
+Run a low-learning-rate repair stage from the current best 1.5B adapter. This uses all refined terms for training and starts a fresh optimizer/scheduler:
+
+```bash
+unset RESUME_FROM_CHECKPOINT
+
+NUM_GPUS=1 \
+USE_DEEPSPEED=0 \
+ATTN_IMPLEMENTATION=sdpa \
+MODEL=Qwen/Qwen2.5-1.5B-Instruct \
+ADAPTER=artifacts/qwen2.5-1.5b-instruct-bidirectional-lora-r64-bs64/final \
+OUTPUT_DIR=artifacts/qwen2.5-1.5b-instruct-refined-all-terms-en-es-stage \
+TRAIN_FILE=data/finetune_refined_experiment_en_es_all_terms/train.jsonl \
+VALIDATION_FILE=data/finetune_refined_experiment_en_es_all_terms/validation.jsonl \
+LORA_R=64 \
+LORA_ALPHA=128 \
+PER_DEVICE_TRAIN_BATCH_SIZE=8 \
+TARGET_EFFECTIVE_BATCH_SIZE=32 \
+LEARNING_RATE=2e-5 \
+NUM_TRAIN_EPOCHS=3 \
+EVAL_STEPS=50 \
+SAVE_STEPS=50 \
+./run_qwen25_15b_finetune.sh
+```
+
+If you want to train without any validation pass, set `EVAL_STRATEGY=no`.
+
 ## Quantization Calibration Sample
 
 For MTK NPU quantization, create a small representative calibration set from the bidirectional training JSONL:

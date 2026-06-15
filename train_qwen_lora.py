@@ -61,6 +61,7 @@ def parse_args():
     parser.add_argument("--eval-steps", type=int, default=100)
     parser.add_argument("--save-steps", type=int, default=100)
     parser.add_argument("--logging-steps", type=int, default=10)
+    parser.add_argument("--eval-strategy", choices=["no", "steps", "epoch"], default="steps")
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=512)
     parser.add_argument("--dataloader-num-workers", type=int, default=4)
@@ -174,13 +175,13 @@ def main():
     enable_input_require_grads(model)
     model.print_trainable_parameters()
 
-    dataset = load_dataset(
-        "json",
-        data_files={"train": args.train_file, "validation": args.validation_file},
-    )
+    data_files = {"train": args.train_file}
+    if args.eval_strategy != "no":
+        data_files["validation"] = args.validation_file
+    dataset = load_dataset("json", data_files=data_files)
     if args.max_train_samples:
         dataset["train"] = dataset["train"].select(range(min(args.max_train_samples, len(dataset["train"]))))
-    if args.max_eval_samples:
+    if args.eval_strategy != "no" and args.max_eval_samples:
         dataset["validation"] = dataset["validation"].select(
             range(min(args.max_eval_samples, len(dataset["validation"])))
         )
@@ -201,7 +202,7 @@ def main():
             print(f"Removed {removed} {split} rows truncated before assistant labels.")
     if len(tokenized["train"]) == 0:
         raise ValueError("No train rows contain assistant labels. Increase --max-seq-length.")
-    if len(tokenized["validation"]) == 0:
+    if args.eval_strategy != "no" and len(tokenized["validation"]) == 0:
         raise ValueError("No validation rows contain assistant labels. Increase --max-seq-length.")
 
     training_args = TrainingArguments(
@@ -213,7 +214,7 @@ def main():
         num_train_epochs=args.num_train_epochs,
         max_steps=args.max_steps,
         logging_steps=args.logging_steps,
-        eval_strategy="steps",
+        eval_strategy=args.eval_strategy,
         eval_steps=args.eval_steps,
         save_steps=args.save_steps,
         save_total_limit=3,
@@ -233,7 +234,7 @@ def main():
         model=model,
         args=training_args,
         train_dataset=tokenized["train"],
-        eval_dataset=tokenized["validation"],
+        eval_dataset=tokenized["validation"] if args.eval_strategy != "no" else None,
         data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True, pad_to_multiple_of=8),
     )
     resume_from_checkpoint = args.resume_from_checkpoint

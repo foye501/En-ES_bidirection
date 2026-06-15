@@ -30,6 +30,11 @@ def parse_args():
     parser.add_argument("--validation-input", default=None, help="Explicit validation CSV or JSONL source.")
     parser.add_argument("--output-dir", default="data/finetune", help="Directory for split JSONL files.")
     parser.add_argument("--validation-ratio", type=float, default=0.02)
+    parser.add_argument(
+        "--train-all",
+        action="store_true",
+        help="Write every input row to train.jsonl and do not hold out validation rows.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--limit", type=int, default=None, help="Optional row limit for a smoke dataset.")
     parser.add_argument(
@@ -134,6 +139,9 @@ def main():
     validation_path = output_dir / "validation.jsonl"
     stats_path = output_dir / "stats.json"
 
+    if args.train_all and (args.train_input or args.validation_input):
+        raise ValueError("--train-all cannot be combined with --train-input/--validation-input.")
+
     if args.train_input or args.validation_input:
         if not args.train_input or not args.validation_input:
             raise ValueError("--train-input and --validation-input must be provided together.")
@@ -148,6 +156,25 @@ def main():
         total = train_count + validation_count
         total_source_rows = train_source_rows + validation_source_rows
         sources = {"train": str(train_source), "validation": str(validation_source)}
+    elif args.train_all:
+        train_count = 0
+        total_source_rows = 0
+        sources = {"source": str(input_path)}
+        with train_path.open("w", encoding="utf-8") as train_out, validation_path.open(
+            "w", encoding="utf-8"
+        ) as validation_out:
+            for row_number, row in enumerate(tqdm(iter_rows(input_path), desc="Preparing train rows"), start=1):
+                if args.limit is not None and total_source_rows >= args.limit:
+                    break
+                validate_row(row, row_number, input_path)
+                for example in row_to_examples(row, bidirectional=args.bidirectional):
+                    encoded = json.dumps(example, ensure_ascii=False) + "\n"
+                    train_out.write(encoded)
+                    train_count += 1
+                total_source_rows += 1
+            validation_out.write("")
+        validation_count = 0
+        total = train_count
     else:
         rng = random.Random(args.seed)
         total = 0
@@ -186,6 +213,7 @@ def main():
         "validation_ratio": args.validation_ratio,
         "seed": args.seed,
         "bidirectional": args.bidirectional,
+        "train_all": args.train_all,
     }
     stats_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(stats, indent=2))

@@ -64,6 +64,7 @@ TRAIN_ARGS=(
   --learning-rate "${LEARNING_RATE:-2e-4}" \
   --num-train-epochs "${NUM_TRAIN_EPOCHS:-1}" \
   --dataloader-num-workers "${DATALOADER_NUM_WORKERS:-4}" \
+  --eval-strategy "${EVAL_STRATEGY:-steps}" \
   --eval-steps "${EVAL_STEPS:-500}" \
   --save-steps "${SAVE_STEPS:-500}" \
   --logging-steps "${LOGGING_STEPS:-10}"
