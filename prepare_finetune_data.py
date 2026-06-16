@@ -38,6 +38,11 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--limit", type=int, default=None, help="Optional row limit for a smoke dataset.")
     parser.add_argument(
+        "--skip-invalid",
+        action="store_true",
+        help="Skip rows with missing required fields and write skipped_rows.jsonl.",
+    )
+    parser.add_argument(
         "--bidirectional",
         action="store_true",
         help="Emit both English-to-Spanish and Spanish-to-English examples for each row.",
@@ -114,19 +119,35 @@ def validate_row(row, row_number, source):
         raise ValueError(f"{source} row {row_number} missing required fields: {missing}")
 
 
-def write_chat_rows(source_path, output_path, limit=None, bidirectional=False):
+def write_chat_rows(source_path, output_path, limit=None, bidirectional=False, skip_invalid=False, skipped_out=None):
     count = 0
     source_rows = 0
+    skipped_count = 0
     with output_path.open("w", encoding="utf-8") as out:
         for row_number, row in enumerate(tqdm(iter_rows(source_path), desc=f"Preparing {source_path.name}"), start=1):
             if limit is not None and source_rows >= limit:
                 break
-            validate_row(row, row_number, source_path)
+            try:
+                validate_row(row, row_number, source_path)
+            except ValueError as error:
+                if not skip_invalid:
+                    raise
+                skipped_count += 1
+                source_rows += 1
+                if skipped_out:
+                    skipped_out.write(
+                        json.dumps(
+                            {"source": str(source_path), "row_number": row_number, "error": str(error), "row": row},
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                continue
             for example in row_to_examples(row, bidirectional=bidirectional):
                 out.write(json.dumps(example, ensure_ascii=False) + "\n")
                 count += 1
             source_rows += 1
-    return count, source_rows
+    return count, source_rows, skipped_count
 
 
 def main():
@@ -138,69 +159,128 @@ def main():
     train_path = output_dir / "train.jsonl"
     validation_path = output_dir / "validation.jsonl"
     stats_path = output_dir / "stats.json"
+    skipped_path = output_dir / "skipped_rows.jsonl"
+    skipped_out = skipped_path.open("w", encoding="utf-8") if args.skip_invalid else None
 
-    if args.train_all and (args.train_input or args.validation_input):
-        raise ValueError("--train-all cannot be combined with --train-input/--validation-input.")
+    try:
+        if args.train_all and (args.train_input or args.validation_input):
+            raise ValueError("--train-all cannot be combined with --train-input/--validation-input.")
 
-    if args.train_input or args.validation_input:
-        if not args.train_input or not args.validation_input:
-            raise ValueError("--train-input and --validation-input must be provided together.")
-        train_source = Path(args.train_input)
-        validation_source = Path(args.validation_input)
-        train_count, train_source_rows = write_chat_rows(
-            train_source, train_path, limit=args.limit, bidirectional=args.bidirectional
-        )
-        validation_count, validation_source_rows = write_chat_rows(
-            validation_source, validation_path, limit=args.limit, bidirectional=args.bidirectional
-        )
-        total = train_count + validation_count
-        total_source_rows = train_source_rows + validation_source_rows
-        sources = {"train": str(train_source), "validation": str(validation_source)}
-    elif args.train_all:
-        train_count = 0
-        total_source_rows = 0
-        sources = {"source": str(input_path)}
-        with train_path.open("w", encoding="utf-8") as train_out, validation_path.open(
-            "w", encoding="utf-8"
-        ) as validation_out:
-            for row_number, row in enumerate(tqdm(iter_rows(input_path), desc="Preparing train rows"), start=1):
-                if args.limit is not None and total_source_rows >= args.limit:
-                    break
-                validate_row(row, row_number, input_path)
-                for example in row_to_examples(row, bidirectional=args.bidirectional):
-                    encoded = json.dumps(example, ensure_ascii=False) + "\n"
-                    train_out.write(encoded)
-                    train_count += 1
-                total_source_rows += 1
-            validation_out.write("")
-        validation_count = 0
-        total = train_count
-    else:
-        rng = random.Random(args.seed)
-        total = 0
-        total_source_rows = 0
-        train_count = 0
-        validation_count = 0
-        sources = {"source": str(input_path)}
+        if args.train_input or args.validation_input:
+            if not args.train_input or not args.validation_input:
+                raise ValueError("--train-input and --validation-input must be provided together.")
+            train_source = Path(args.train_input)
+            validation_source = Path(args.validation_input)
+            train_count, train_source_rows, train_skipped_count = write_chat_rows(
+                train_source,
+                train_path,
+                limit=args.limit,
+                bidirectional=args.bidirectional,
+                skip_invalid=args.skip_invalid,
+                skipped_out=skipped_out,
+            )
+            validation_count, validation_source_rows, validation_skipped_count = write_chat_rows(
+                validation_source,
+                validation_path,
+                limit=args.limit,
+                bidirectional=args.bidirectional,
+                skip_invalid=args.skip_invalid,
+                skipped_out=skipped_out,
+            )
+            total = train_count + validation_count
+            total_source_rows = train_source_rows + validation_source_rows
+            skipped_count = train_skipped_count + validation_skipped_count
+            sources = {"train": str(train_source), "validation": str(validation_source)}
+        elif args.train_all:
+            train_count = 0
+            skipped_count = 0
+            total_source_rows = 0
+            sources = {"source": str(input_path)}
+            with train_path.open("w", encoding="utf-8") as train_out, validation_path.open(
+                "w", encoding="utf-8"
+            ) as validation_out:
+                for row_number, row in enumerate(tqdm(iter_rows(input_path), desc="Preparing train rows"), start=1):
+                    if args.limit is not None and total_source_rows >= args.limit:
+                        break
+                    try:
+                        validate_row(row, row_number, input_path)
+                    except ValueError as error:
+                        if not args.skip_invalid:
+                            raise
+                        skipped_count += 1
+                        if skipped_out:
+                            skipped_out.write(
+                                json.dumps(
+                                    {
+                                        "source": str(input_path),
+                                        "row_number": row_number,
+                                        "error": str(error),
+                                        "row": row,
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                        total_source_rows += 1
+                        continue
+                    for example in row_to_examples(row, bidirectional=args.bidirectional):
+                        encoded = json.dumps(example, ensure_ascii=False) + "\n"
+                        train_out.write(encoded)
+                        train_count += 1
+                    total_source_rows += 1
+                validation_out.write("")
+            validation_count = 0
+            total = train_count
+        else:
+            rng = random.Random(args.seed)
+            total = 0
+            total_source_rows = 0
+            train_count = 0
+            validation_count = 0
+            skipped_count = 0
+            sources = {"source": str(input_path)}
 
-        with train_path.open("w", encoding="utf-8") as train_out, validation_path.open(
-            "w", encoding="utf-8"
-        ) as validation_out:
-            for row_number, row in enumerate(tqdm(iter_rows(input_path), desc="Preparing rows"), start=1):
-                if args.limit is not None and total_source_rows >= args.limit:
-                    break
-                validate_row(row, row_number, input_path)
+            with train_path.open("w", encoding="utf-8") as train_out, validation_path.open(
+                "w", encoding="utf-8"
+            ) as validation_out:
+                for row_number, row in enumerate(tqdm(iter_rows(input_path), desc="Preparing rows"), start=1):
+                    if args.limit is not None and total_source_rows >= args.limit:
+                        break
+                    try:
+                        validate_row(row, row_number, input_path)
+                    except ValueError as error:
+                        if not args.skip_invalid:
+                            raise
+                        skipped_count += 1
+                        if skipped_out:
+                            skipped_out.write(
+                                json.dumps(
+                                    {
+                                        "source": str(input_path),
+                                        "row_number": row_number,
+                                        "error": str(error),
+                                        "row": row,
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                        total_source_rows += 1
+                        continue
 
-                if rng.random() < args.validation_ratio:
-                    target_out = validation_out
-                    validation_count += len(row_to_examples(row, bidirectional=args.bidirectional))
-                else:
-                    target_out = train_out
-                    train_count += len(row_to_examples(row, bidirectional=args.bidirectional))
-                for example in row_to_examples(row, bidirectional=args.bidirectional):
-                    target_out.write(json.dumps(example, ensure_ascii=False) + "\n")
-                    total += 1
-                total_source_rows += 1
+                    if rng.random() < args.validation_ratio:
+                        target_out = validation_out
+                        validation_count += len(row_to_examples(row, bidirectional=args.bidirectional))
+                    else:
+                        target_out = train_out
+                        train_count += len(row_to_examples(row, bidirectional=args.bidirectional))
+                    for example in row_to_examples(row, bidirectional=args.bidirectional):
+                        target_out.write(json.dumps(example, ensure_ascii=False) + "\n")
+                        total += 1
+                    total_source_rows += 1
+    finally:
+        if skipped_out:
+            skipped_out.close()
 
     stats = {
         "sources": sources,
@@ -214,6 +294,9 @@ def main():
         "seed": args.seed,
         "bidirectional": args.bidirectional,
         "train_all": args.train_all,
+        "skip_invalid": args.skip_invalid,
+        "skipped": skipped_count,
+        "skipped_rows_path": str(skipped_path) if args.skip_invalid else None,
     }
     stats_path.write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(stats, indent=2))
