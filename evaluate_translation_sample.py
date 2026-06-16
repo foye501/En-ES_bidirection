@@ -133,13 +133,17 @@ def read_cases_file(path, direction):
     examples = []
     with Path(path).open("r", encoding="utf-8-sig", newline="") as src:
         reader = csv.DictReader(src)
-        required = {"direction", "source_text", "reference_text"}
+        required = {"source_text"}
         missing = required - set(reader.fieldnames or [])
         if missing:
             raise ValueError(f"{path} is missing required columns: {sorted(missing)}")
 
         for case_index, row in enumerate(reader):
-            item_direction = row["direction"]
+            item_direction = row.get("direction") or direction
+            if item_direction == "both":
+                raise ValueError(
+                    f"{path} has no direction column, so --direction must be en-es or es-en, not both."
+                )
             if item_direction not in directions:
                 continue
             if item_direction == "en-es":
@@ -163,7 +167,10 @@ def read_cases_file(path, direction):
                     "target_length": row.get("target_length", ""),
                     "style": row.get("style", ""),
                     "source_text": row["source_text"],
-                    "reference_text": row["reference_text"],
+                    "reference_text": row.get("reference_text", ""),
+                    "baseline_prediction": row.get("prediction", ""),
+                    "baseline_gpt_score": row.get("baseline_gpt_score", ""),
+                    "baseline_chrf_like": row.get("chrf_like", ""),
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPTS[item_direction]},
                         {"role": "user", "content": user},
@@ -277,20 +284,36 @@ def generate_batch(model, tokenizer, device, examples, max_new_tokens, temperatu
 
 
 def summarize(results):
+    scored_results = [item for item in results if item["reference_text"]]
     summary = {
         "num_examples": len(results),
-        "exact_match": sum(item["exact_match"] for item in results) / len(results),
-        "token_f1": sum(item["token_f1"] for item in results) / len(results),
-        "chrf_like": sum(item["chrf_like"] for item in results) / len(results),
+        "num_scored_examples": len(scored_results),
     }
+    if scored_results:
+        summary.update(
+            {
+                "exact_match": sum(item["exact_match"] for item in scored_results) / len(scored_results),
+                "token_f1": sum(item["token_f1"] for item in scored_results) / len(scored_results),
+                "chrf_like": sum(item["chrf_like"] for item in scored_results) / len(scored_results),
+            }
+        )
+    else:
+        summary["metrics_note"] = "No reference_text column was provided, so automatic metrics were skipped."
     for direction in sorted({item["direction"] for item in results}):
         subset = [item for item in results if item["direction"] == direction]
+        scored_subset = [item for item in subset if item["reference_text"]]
         summary[direction] = {
             "num_examples": len(subset),
-            "exact_match": sum(item["exact_match"] for item in subset) / len(subset),
-            "token_f1": sum(item["token_f1"] for item in subset) / len(subset),
-            "chrf_like": sum(item["chrf_like"] for item in subset) / len(subset),
+            "num_scored_examples": len(scored_subset),
         }
+        if scored_subset:
+            summary[direction].update(
+                {
+                    "exact_match": sum(item["exact_match"] for item in scored_subset) / len(scored_subset),
+                    "token_f1": sum(item["token_f1"] for item in scored_subset) / len(scored_subset),
+                    "chrf_like": sum(item["chrf_like"] for item in scored_subset) / len(scored_subset),
+                }
+            )
     return summary
 
 
@@ -327,7 +350,7 @@ def main():
         )
         for example, prediction in zip(batch, predictions):
             reference = example["reference_text"]
-            exact_match = int(normalize_text(prediction) == normalize_text(reference))
+            exact_match = int(normalize_text(prediction) == normalize_text(reference)) if reference else None
             results.append(
                 {
                     "direction": example["direction"],
@@ -337,10 +360,13 @@ def main():
                     "style": example["style"],
                     "source_text": example["source_text"],
                     "reference_text": reference,
+                    "baseline_prediction": example.get("baseline_prediction", ""),
+                    "baseline_gpt_score": example.get("baseline_gpt_score", ""),
+                    "baseline_chrf_like": example.get("baseline_chrf_like", ""),
                     "prediction": prediction,
                     "exact_match": exact_match,
-                    "token_f1": token_f1(prediction, reference),
-                    "chrf_like": chrf_like(prediction, reference),
+                    "token_f1": token_f1(prediction, reference) if reference else None,
+                    "chrf_like": chrf_like(prediction, reference) if reference else None,
                 }
             )
 
