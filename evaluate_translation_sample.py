@@ -11,7 +11,7 @@ from peft import PeftModel
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from prepare_finetune_data import SYSTEM_PROMPTS, row_to_chat
+from prepare_finetune_data import SYSTEM_PROMPTS
 from train_qwen_lora import DEFAULT_MODEL, has_cuda_bf16
 
 
@@ -36,6 +36,12 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--prompt-template",
+        choices=["structured", "simple"],
+        default="structured",
+        help="Use structured legacy prompts or simple prompts matching the full ASR chat dataset.",
+    )
     parser.add_argument("--merge-adapter", action="store_true", help="Merge LoRA weights for faster inference.")
     parser.add_argument(
         "--allow-model-mismatch",
@@ -105,12 +111,45 @@ def read_test_rows(path):
         return rows
 
 
-def expand_directions(rows, direction):
+def simple_system_prompt(direction):
+    if direction == "en-es":
+        return "Translate the following English medical text into Spanish."
+    if direction == "es-en":
+        return "Translate the following Spanish medical text into English."
+    raise ValueError(f"Unsupported direction: {direction}")
+
+
+def build_messages(item_direction, source_text, row, prompt_template):
+    if prompt_template == "simple":
+        return [
+            {"role": "system", "content": simple_system_prompt(item_direction)},
+            {"role": "user", "content": source_text},
+        ]
+
+    if item_direction == "en-es":
+        source_language = "English"
+    elif item_direction == "es-en":
+        source_language = "Spanish"
+    else:
+        raise ValueError(f"Unsupported direction: {item_direction}")
+
+    user = (
+        f"Direction: {'English to Spanish' if item_direction == 'en-es' else 'Spanish to English'}\n"
+        f"Style: {row.get('style', '')}\n"
+        f"Target length: about {row.get('target_length', '')} words\n"
+        f"{source_language}: {source_text}"
+    )
+    return [
+        {"role": "system", "content": SYSTEM_PROMPTS[item_direction]},
+        {"role": "user", "content": user},
+    ]
+
+
+def expand_directions(rows, direction, prompt_template):
     directions = ["en-es", "es-en"] if direction == "both" else [direction]
     examples = []
     for row in rows:
         for item_direction in directions:
-            chat = row_to_chat(row, direction=item_direction)
             source_text = row["english_scenario"] if item_direction == "en-es" else row["spanish_translation"]
             reference_text = row["spanish_translation"] if item_direction == "en-es" else row["english_scenario"]
             examples.append(
@@ -122,13 +161,13 @@ def expand_directions(rows, direction):
                     "style": row["style"],
                     "source_text": source_text,
                     "reference_text": reference_text,
-                    "messages": chat["messages"][:-1],
+                    "messages": build_messages(item_direction, source_text, row, prompt_template),
                 }
             )
     return examples
 
 
-def read_cases_file(path, direction):
+def read_cases_file(path, direction, prompt_template):
     directions = {"en-es", "es-en"} if direction == "both" else {direction}
     examples = []
     with Path(path).open("r", encoding="utf-8-sig", newline="") as src:
@@ -146,19 +185,9 @@ def read_cases_file(path, direction):
                 )
             if item_direction not in directions:
                 continue
-            if item_direction == "en-es":
-                source_language = "English"
-            elif item_direction == "es-en":
-                source_language = "Spanish"
-            else:
+            if item_direction not in {"en-es", "es-en"}:
                 raise ValueError(f"Unsupported direction in {path}: {item_direction}")
 
-            user = (
-                f"Direction: {'English to Spanish' if item_direction == 'en-es' else 'Spanish to English'}\n"
-                f"Style: {row.get('style', '')}\n"
-                f"Target length: about {row.get('target_length', '')} words\n"
-                f"{source_language}: {row['source_text']}"
-            )
             examples.append(
                 {
                     "direction": item_direction,
@@ -171,10 +200,7 @@ def read_cases_file(path, direction):
                     "baseline_prediction": row.get("prediction", ""),
                     "baseline_gpt_score": row.get("baseline_gpt_score", ""),
                     "baseline_chrf_like": row.get("chrf_like", ""),
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPTS[item_direction]},
-                        {"role": "user", "content": user},
-                    ],
+                    "messages": build_messages(item_direction, row["source_text"], row, prompt_template),
                 }
             )
     return examples
@@ -323,13 +349,13 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.cases_file:
-        examples = read_cases_file(args.cases_file, args.direction)
+        examples = read_cases_file(args.cases_file, args.direction, args.prompt_template)
     else:
         rows = read_test_rows(args.test_file)
         if args.sample_size > len(rows):
             raise ValueError(f"Requested {args.sample_size} rows, but {args.test_file} has only {len(rows)} rows.")
         sampled_rows = random.Random(args.seed).sample(rows, args.sample_size)
-        examples = expand_directions(sampled_rows, args.direction)
+        examples = expand_directions(sampled_rows, args.direction, args.prompt_template)
     if not examples:
         raise ValueError("No evaluation examples were selected.")
 
@@ -363,6 +389,7 @@ def main():
                     "baseline_prediction": example.get("baseline_prediction", ""),
                     "baseline_gpt_score": example.get("baseline_gpt_score", ""),
                     "baseline_chrf_like": example.get("baseline_chrf_like", ""),
+                    "prompt_template": args.prompt_template,
                     "prediction": prediction,
                     "exact_match": exact_match,
                     "token_f1": token_f1(prediction, reference) if reference else None,
